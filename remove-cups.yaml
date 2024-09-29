@@ -1,0 +1,60 @@
+---
+- name: Detect Cups and remove due to vulnerability
+  hosts: all
+  become: true
+
+  tasks:
+    
+    - name: Gather package facts
+      ansible.builtin.package_facts:
+        manager: auto
+
+    - name: Debug cups variable
+      ansible.builtin.debug:
+        var: ansible_facts.packages
+
+    - name: Block for servers with Cups in package facts
+      block:
+
+        - name: Check for Cups package installation
+          ansible.builtin.debug:
+            msg: "Package {{ item.name }} from source {{ item.source }} is installed!"
+          loop: "{{ ansible_facts.packages['cups'] }}"
+
+        - name: Stop Cups service before removal
+          ansible.builtin.service:
+            name: cups
+            state: stopped
+        
+        - name: Remove cups package
+          ansible.builtin.package:
+            name: cups
+            state: absent
+          register: cups_package_removal
+
+        - name: Send a message when cups is removed.
+          ansible.builtin.debug:
+            msg: "Cups has been removed successfully for {{ ansible_fqdn  }}"
+
+
+      rescue:
+        # Sometimes the package module is finicky...
+        - name: Package module failed remove based on OS Family facts for RPM
+          ansible.builtin.dnf:
+            name: cups
+            state: absent
+          when: ansible_facts['os_family'] == "RedHat"
+          register: rh_rpm
+
+        - name: Package module failed remove based on OS Family facts for Apt
+          ansible.builtin.apt:
+            name: cups
+            state: absent
+          when: ansible_facts['os_family'] == "Debian"
+          register: debian_apt
+
+        - name: Send a message when cups is removed in the rescue task.
+          ansible.builtin.debug:
+            msg: "Cups has been removed successfully for {{ ansible_fqdn }} in the rescue task."
+          when: rh_rpm.changed or debian_apt.changed
+      when: "'cups' in ansible_facts.packages"
